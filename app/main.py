@@ -12,6 +12,13 @@ app = FastAPI(title="Supermarket Assistant Python")
 def dumps(v) -> str:
     return orjson.dumps(v).decode()
 
+@app.get("/")
+async def root():
+    return {
+        "service": "Supermarket Assistant API",
+        "endpoints": ["GET /health", "POST /webhook/uaz", "POST /agent/dryrun", "GET /docs"],
+    }
+
 @app.get("/health")
 async def health():
     return {"ok": True}

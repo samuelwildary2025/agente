@@ -2,7 +2,7 @@ import redis.asyncio as redis
 
 from app.config import settings
 
-r = redis.from_url("redis://redis:6379/0", decode_responses=True)
+r = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 def msgs_key(tel: str) -> str:
     return f"msgs:{tel}"

@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    depends_on: [redis, postgres]
+  worker:
+    build: .
+    command: python -m app.worker
+    depends_on: [redis, postgres]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes:
+      - redis_data:/data
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: superdb
+    ports: ["5432:5432"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  pg_data:
+  redis_data:

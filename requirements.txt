@@ -3,3 +3,7 @@ uvicorn[standard]==0.32.0
 redis>=4.2.0
 orjson
 pydantic-settings
+ httpx
+ SQLAlchemy>=1.4,<2.0
+ asyncpg
+ tenacity

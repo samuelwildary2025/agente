@@ -4,6 +4,8 @@ services:
     build: .
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       REDIS_HOST: localhost
       POSTGRES_HOST: localhost
@@ -11,5 +13,11 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
     # Removido depends_on, pois Redis e Postgres serão instalados manualmente
+  worker:
+    build: .
+    command: python -m app.worker
+    env_file:
+      - .env
+    restart: unless-stopped
 # Removidos os serviços redis e postgres
 # Removidos os volumes redis_data e pg_data

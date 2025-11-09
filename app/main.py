@@ -1,5 +1,5 @@
 import orjson, json
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Body
 from fastapi.responses import JSONResponse
 from app.models.schemas import WebhookPayload, DryRunInput
 from app.services.redis_client import r, msgs_key, block_key
@@ -24,12 +24,38 @@ async def health():
     return {"ok": True}
 
 @app.post("/webhook/uaz")
-async def webhook_uaz(req: Request):
+async def webhook_uaz(
+    req: Request,
+    body: dict | None = Body(
+        default=None,
+        description="Payload do webhook (JSON)",
+        example={
+            "BaseUrl": "https://example",
+            "EventType": "MessageCreated",
+            "chat": {"wa_lastMessageType": "Conversation", "wa_contactName": "Cliente"},
+            "instanceName": "inst",
+            "message": {
+                "chatid": "5599999999999",
+                "content": "Quero um leite",
+                "messageTimestamp": 1700000000,
+                "messageType": "textmessage",
+                "messageid": "abc123",
+                "fromMe": False,
+            },
+            "owner": "owner",
+            "token": "token",
+        },
+    ),
+):
     # Parser tolerante: aceita application/json, texto JSON, ou form com campo JSON
     async def parse_body() -> dict:
         ct = (req.headers.get("content-type") or "").lower()
         if "application/json" in ct:
-            return await req.json()
+            # Se o Swagger enviar JSON via Body, usamos ele
+            try:
+                return body if body is not None else await req.json()
+            except Exception:
+                pass
         # tenta direto do corpo
         body = (await req.body()).decode("utf-8", "ignore").strip()
         if body:
@@ -69,7 +95,7 @@ async def webhook_uaz(req: Request):
                 return v.strip()
         return None
 
-    raw = await parse_body()
+    raw = body if body is not None else await parse_body()
     # tenta nosso schema oficial primeiro; se falhar, extrai campos essenciais de formatos alternativos
     try:
         payload = WebhookPayload(**raw)

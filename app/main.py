@@ -25,8 +25,9 @@ async def health():
 
 @app.post("/webhook/uaz")
 async def webhook_uaz(req: Request):
-    raw = await req.json()
+    # Garante resposta 400 quando corpo está vazio ou JSON inválido
     try:
+        raw = await req.json()
         payload = WebhookPayload(**raw)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid payload: {e}")

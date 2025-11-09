@@ -1,4 +1,4 @@
-import orjson
+import orjson, json
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.models.schemas import WebhookPayload, DryRunInput
@@ -25,14 +25,73 @@ async def health():
 
 @app.post("/webhook/uaz")
 async def webhook_uaz(req: Request):
-    # Garante resposta 400 quando corpo está vazio ou JSON inválido
-    try:
-        raw = await req.json()
-        payload = WebhookPayload(**raw)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"invalid payload: {e}")
+    # Parser tolerante: aceita application/json, texto JSON, ou form com campo JSON
+    async def parse_body() -> dict:
+        ct = (req.headers.get("content-type") or "").lower()
+        if "application/json" in ct:
+            return await req.json()
+        # tenta direto do corpo
+        body = (await req.body()).decode("utf-8", "ignore").strip()
+        if body:
+            try:
+                return json.loads(body)
+            except Exception:
+                pass
+        # tenta como form
+        try:
+            form = await req.form()
+            for key in ("payload", "data", "json", "body"):
+                if key in form:
+                    val = form[key]
+                    if isinstance(val, bytes):
+                        val = val.decode("utf-8", "ignore")
+                    try:
+                        return json.loads(val)
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="invalid payload: unable to parse body as JSON")
 
-    tel = payload.message.chatid
+    def get_nested(d: dict, path: list[str]):
+        cur = d
+        for k in path:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(k)
+            if cur is None:
+                return None
+        return cur
+
+    def coalesce(*vals):
+        for v in vals:
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return None
+
+    raw = await parse_body()
+    # tenta nosso schema oficial primeiro; se falhar, extrai campos essenciais de formatos alternativos
+    try:
+        payload = WebhookPayload(**raw)
+        tel = payload.message.chatid
+        mtype = (payload.message.messageType or "").lower()
+        text = payload.message.content or ""
+    except Exception:
+        tel = coalesce(
+            get_nested(raw, ["message", "chatid"]),
+            raw.get("chatid"), raw.get("chatId"), raw.get("number"), raw.get("telefone"), raw.get("phone")
+        )
+        text = coalesce(
+            get_nested(raw, ["message", "content"]),
+            raw.get("content"), raw.get("text"), raw.get("body"), raw.get("message")
+        ) or ""
+        mtype = (coalesce(
+            get_nested(raw, ["message", "messageType"]),
+            raw.get("messageType"), raw.get("type"), get_nested(raw, ["chat", "wa_lastMessageType"])
+        ) or "textmessage").lower()
+        if not tel:
+            raise HTTPException(status_code=400, detail="invalid payload: missing chatid/number")
+
     bk = await r.get(block_key(tel))
     if bk:
         return JSONResponse({"ignored": "blocked"})
@@ -42,8 +101,7 @@ async def webhook_uaz(req: Request):
     except Exception:
         pass
 
-    text = payload.message.content or ""
-    if payload.message.messageType.lower() in ("audiomessage", "audio"):
+    if mtype in ("audiomessage", "audio"):
         text = "[audio recebido]"
 
     try:

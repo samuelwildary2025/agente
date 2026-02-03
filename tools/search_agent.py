@@ -7,10 +7,8 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from pydantic.v1 import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.output_parsers import JsonOutputParser
 
 from config.settings import settings
 from config.logger import setup_logger
@@ -103,37 +101,12 @@ def _run_analista_agent_for_term(term: str, telefone: Optional[str] = None) -> d
         except Exception:
             return {"ok": False, "termo": term, "motivo": "Resposta nao-JSON do analista"}
 
+
     return {"ok": False, "termo": term, "motivo": "Sem resposta"}
 
 
-TERM_EXTRACTOR_PROMPT = """
-Você é um extrator de termos de produtos para um supermercado.
-
-Tarefa: Dado o texto do cliente, retorne uma lista JSON pura de termos para busca no catálogo.
-
-## REGRAS CRÍTICAS:
-
-1. **NUNCA REMOVA MARCAS**: Palavras como "Vô", "Vo", "Omo", "Ala", "Pilão", "Melita", "Dolca", "Richester" SÃO MARCAS.
-   - ❌ ERRADO: "arroz vô parboizado" → ["arroz parboizado"]
-   - ✅ CERTO: "arroz vô parboizado" → ["arroz vô parboizado"]
-   - ❌ ERRADO: "café Pilão" → ["café"]
-   - ✅ CERTO: "café Pilão" → ["café Pilão"]
-
-2. **MANTENHA NÚMEROS DE PRODUTO**: "Kit 3", "Pack 12", "Coca 2L", "1kg" fazem parte do produto.
-
-3. **REMOVA APENAS QUANTIDADE DO PEDIDO**: "2x arroz" → ["arroz"], "1 coca" → ["coca"]
-
-4. **PEDIDO POR VALOR**: Se tem R$ ou "reais de", adicione "KG":
-   - "5 reais de presunto" → ["presunto KG"]
-   - "10 reais de queijo" → ["queijo KG"]
-
-5. **OPÇÕES**: Mantenha palavras como "opções", "quais", "tipos":
-   - "sabão (opções)" → ["sabão opções"]
-
-Retorne APENAS JSON (lista de strings).
-
-Texto: {text}
-""".strip()
+# TERM_EXTRACTOR_PROMPT REMOVIDO - Simplificação do fluxo
+# O Vendedor envia os termos já separados e o Analista resolve
 
 # ============================================
 # 2. Configurações do Modelo
@@ -203,24 +176,9 @@ def analista_produtos_tool(queries_str: str, telefone: str = None) -> str:
     results = []
     validated_products = []  # Para cache no Redis
     
-    extracted_terms: List[str] = []
-    try:
-        llm_terms = _get_fast_llm()
-        prompt_terms = ChatPromptTemplate.from_template(TERM_EXTRACTOR_PROMPT)
-        chain_terms = prompt_terms | llm_terms | JsonOutputParser()
-        extracted = chain_terms.invoke({"text": queries_str})
-
-        if isinstance(extracted, list):
-            extracted_terms = [str(t).strip() for t in extracted if str(t).strip()]
-        elif isinstance(extracted, dict):
-            raw_list = extracted.get("terms") or extracted.get("itens") or extracted.get("produtos") or []
-            if isinstance(raw_list, list):
-                extracted_terms = [str(t).strip() for t in raw_list if str(t).strip()]
-    except Exception as e:
-        logger.warning(f"⚠️ [SUB-AGENT] Falha ao extrair termos via LLM: {e}")
-
-    if not extracted_terms:
-        extracted_terms = [t.strip() for t in queries_str.replace("\n", ",").split(",") if t.strip()]
+    # SIMPLIFICADO: Separação simples por vírgula ou newline (sem LLM intermediário)
+    # O Vendedor já envia termos limpos e o Analista resolve o significado
+    extracted_terms = [t.strip() for t in queries_str.replace("\n", ",").split(",") if t.strip()]
 
     mode = "lote" if len(extracted_terms) > 1 else "individual"
     logger.info(f"🕵️ [SUB-AGENT] Modo de busca: {mode} | termos: {extracted_terms}")

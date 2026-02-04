@@ -218,7 +218,9 @@ def analista_produtos_tool(queries_str: str, telefone: str = None) -> str:
                 f"- Nome: {nome}\n"
                 f"- Preço Tabela: R$ {preco:.2f}\n"
                 f"- Obs: {razao}\n"
-                f"\n🔔 DICA: use add_item_tool AGORA para adicionar este item."
+                f"\n🔔 DICA: Item encontrado com sucesso.\n"
+                f"- Se o cliente pediu para COMPRAR/ADICIONAR: use add_item_tool.\n"
+                f"- Se o cliente apenas PERGUNTOU PREÇO/TEM: responda apenas com o preço."
             )
             return (result_str, validated_item)
             

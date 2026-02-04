@@ -182,6 +182,9 @@ def search_products_vector(query: str, limit: int = 20) -> str:
         "pao para hot dog": "pao hot dog",
         "pao de hot dog": "pao hot dog",
         "pao de cachorro quente": "pao hot dog",
+        # Tabacaria
+        "carteira": "maco",
+        "maço": "maco",
         # Laticínios
         "leite de saco": "leite liquido",
         "leite saco": "leite liquido",

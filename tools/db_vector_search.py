@@ -191,6 +191,9 @@ def search_products_vector(query: str, limit: int = 20) -> str:
         # Laticínios
         "leite de saco": "leite liquido",
         "leite saco": "leite liquido",
+        "leite em caixa": "leite liquido",
+        "leite de caixa": "leite liquido",
+        "leite caixa": "leite liquido",
         # Normalização de acentos (banco usa sem acento)
         "açúcar": "acucar cristal",
         "açucar": "acucar cristal",

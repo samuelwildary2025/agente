@@ -485,6 +485,43 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
     media_mimetype = payload.get("mimetype")
     media_caption = payload.get("caption")
     
+    # ============================================
+    # QUOTED MESSAGE (Mensagem Citada/Respondida)
+    # ============================================
+    # Quando o cliente responde uma mensagem específica (arrasta e responde),
+    # o webhook envia informações sobre a mensagem original citada.
+    quoted_text = None
+    quoted_sender = None
+    
+    # Tentar extrair de diferentes estruturas de payload
+    # 1. Formato UAZAPI: quotedMsg ou quotedMessage
+    quoted_msg = payload.get("quotedMsg") or payload.get("quotedMessage") or {}
+    if isinstance(quoted_msg, dict):
+        quoted_text = quoted_msg.get("body") or quoted_msg.get("text") or quoted_msg.get("caption")
+        quoted_sender = quoted_msg.get("participant") or quoted_msg.get("sender") or quoted_msg.get("from")
+    
+    # 2. Formato contextInfo (Baileys/WPPConnect)
+    context_info = payload.get("contextInfo") or payload.get("context") or {}
+    if isinstance(context_info, dict) and not quoted_text:
+        quoted_text = context_info.get("quotedMessage", {}).get("conversation") or \
+                      context_info.get("quotedMessage", {}).get("extendedTextMessage", {}).get("text")
+        quoted_sender = context_info.get("participant") or context_info.get("remoteJid")
+    
+    # 3. Formato simples (algumas APIs enviam direto)
+    if not quoted_text:
+        quoted_text = payload.get("quotedText") or payload.get("quoted_text")
+    
+    # Se encontrou uma mensagem citada, adicionar como contexto
+    if quoted_text:
+        quoted_text = str(quoted_text).strip()
+        if quoted_text:
+            # Formatar para o agente entender o contexto
+            context_prefix = f"[Cliente respondeu à mensagem: \"{quoted_text[:200]}\"]\n"
+            logger.info(f"💬 Quoted message detectada: {quoted_text[:50]}...")
+    else:
+        context_prefix = ""
+    
+    
     # Se tem mediaBase64, já sabemos que é mídia
     if media_base64:
         if media_mimetype and "audio" in media_mimetype:
@@ -657,6 +694,12 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 mensagem_texto = "[PDF recebido, não foi possível extrair texto ou salvar arquivo]"
 
+    # Adicionar contexto da mensagem citada (quoted message) se existir
+    if context_prefix and mensagem_texto:
+        mensagem_texto = context_prefix + mensagem_texto
+    elif context_prefix:
+        mensagem_texto = context_prefix.strip()
+
     return {
         "telefone": telefone,
         "mensagem_texto": mensagem_texto,
@@ -666,6 +709,7 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
         "media_url": media_url,
         "media_base64": media_base64,
         "media_mimetype": media_mimetype,
+        "quoted_text": quoted_text,  # Mensagem citada original (se houver)
     }
 
 def send_whatsapp_message(telefone: str, mensagem: str) -> bool:

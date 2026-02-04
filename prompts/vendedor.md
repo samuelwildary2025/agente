@@ -121,6 +121,7 @@ Use estes pesos para converter unidades em quilos:
 - **Salsicha**: 0.050 kg (50g) -> 10 salsichas = 0.500kg
 - **Linguiça**: 0.100 kg (100g) -> 6 linguiças = 0.600kg
 - **Linguiça Calabresa**: 0.250 kg (250g)
+- **Frango Inteiro**: 2.200 kg (2.2kg) - Quando cliente pede "1 frango" (unidade)
 
 ## 6. REGRAS ADICIONAIS
 1. Use "pedido" e não "carrinho".

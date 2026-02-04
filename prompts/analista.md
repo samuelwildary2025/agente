@@ -103,6 +103,10 @@ Retorne campo `opcoes` com lista se:
 | Nescau pó / lata | ACHOC PO NESCAU |
 | Calabresa (sem "pacote") | LINGUICA CALABRESA KG |
 | Coca Zero (sem tamanho) | COCA COLA ZERO 2L |
+| Frango / Galinha | FRANGO ABATIDO (KG) |
+
+### Proibições Específicas
+- **Frango em Oferta**: Se encontrar produto com nome "Oferta" ou "Promoção" para Frango, **NÃO USE** (geralmente é venda apenas balcão). Use "Frango Abatido" oub similar.
 
 ---
 

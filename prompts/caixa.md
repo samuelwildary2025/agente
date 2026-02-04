@@ -109,6 +109,7 @@ Exemplo de Finalização (Sucesso):
 ```
 ✅ *Pedido confirmado e enviado!*
 Avisaremos quando seu pedido for separado.
+(Se for entre 12h e 15h, adicione: "A separação do seu pedido começará às 15:00.")
 Obrigada pela preferência! ✨
 ```
 

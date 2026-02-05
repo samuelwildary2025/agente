@@ -388,7 +388,10 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     def _clean_number(jid: Any) -> Optional[str]:
         """Extrai apenas o número de telefone de um JID válido."""
-        if not jid or not isinstance(jid, str): return None
+        if jid is None: return None
+        
+        # Cast para string para garantir (ex: sender_pn pode vir como int)
+        jid = str(jid)
         
         # Se tiver @lid, é ID de dispositivo (IGNORAR)
         if "@lid" in jid: return None

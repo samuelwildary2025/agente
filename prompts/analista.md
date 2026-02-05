@@ -77,7 +77,8 @@ Descarte itens que não correspondam a:
 
 ### 🥛 Laticínios
 - leite de saco → **Leite Líquido**
-- bandeja danone → **Iogurte Polpa Ninho**
+- bandeja danone → **IOGURTE POLPA BETANIA BDJ ou IOGURTE POLPA NINHO BDJ**
+- bandeja iogurte → **IOGURTE POLPA BETANIA BDJ ou IOGURTE POLPA NINHO BDJ**
 
 ### 🛒 Mercearia
 - arroz → **Arroz Tipo 1**

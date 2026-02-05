@@ -463,6 +463,23 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
         if cleaned:
             telefone = cleaned
             break
+
+    # 5. Fallback: ID da mensagem (Muitas vezes contém o número: 5585...@s.whatsapp.net:HASH)
+    if not telefone:
+        id_candidates = []
+        id_candidates.append(payload.get("id"))
+        id_candidates.append(payload.get("messageid"))
+        if isinstance(message_any, dict):
+            id_candidates.append(message_any.get("id"))
+            id_candidates.append(message_any.get("messageid"))
+            
+        for cid in id_candidates:
+            cleaned = _clean_number(cid)
+            if cleaned:
+                # Validação extra: ID geralmente tem : ou prefixo longo
+                logger.info(f"⚠️ Telefone extraído do ID da mensagem: {cleaned}")
+                telefone = cleaned
+                break
             
     # Fallback de emergência (avisa no log)
     if not telefone and payload.get("from"):

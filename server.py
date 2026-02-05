@@ -388,10 +388,7 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     def _clean_number(jid: Any) -> Optional[str]:
         """Extrai apenas o número de telefone de um JID válido."""
-        if jid is None: return None
-        
-        # Cast para string para garantir (ex: sender_pn pode vir como int)
-        jid = str(jid)
+        if not jid or not isinstance(jid, str): return None
         
         # Se tiver @lid, é ID de dispositivo (IGNORAR)
         if "@lid" in jid: return None
@@ -442,15 +439,8 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
     # 1. Sender/ChatID (Geralmente o mais preciso: 5585...@s.whatsapp.net)
     if isinstance(message_any, dict):
         candidates.append(message_any.get("sender"))
+        candidates.append(message_any.get("sender_pn")) # FIX: Prioridade para o número real se vier
         candidates.append(message_any.get("chatid"))
-        # NOVO: sender_pn (comum em payloads de nova API para LID)
-        candidates.append(message_any.get("sender_pn"))
-    
-    # NOVO: Tentar extrair do ID da mensagem se tiver formato PHONE:ID
-    # Ex: 558592978150:ACE654F2ED254EE46EE21174433DBC4D
-    msg_id_val = message_any.get("id") or payload.get("id") or message_any.get("messageid")
-    if msg_id_val and ":" in str(msg_id_val):
-        candidates.append(str(msg_id_val).split(":")[0])
     
     # 2. Objeto Chat
     candidates.append(chat.get("id"))

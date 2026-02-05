@@ -92,7 +92,7 @@ class WhatsAppAPI:
             resp = requests.post(url, headers=self._get_headers(), json=payload, timeout=15)
             
             if resp.status_code == 200:
-                logger.info(f"✅ Mensagem enviada para {clean_num}")
+                logger.info(f"✅ Mensagem enviada para {clean_num} | Resp: {resp.text[:100]}")
                 return True
             else:
                 logger.error(f"❌ Erro UAZAPI ({resp.status_code}): {resp.text[:300]}")
@@ -144,7 +144,7 @@ class WhatsAppAPI:
             resp = requests.post(url, headers=self._get_headers(), json=payload, timeout=30)
             
             if resp.status_code == 200:
-                logger.info(f"✅ Mídia enviada para {clean_num}")
+                logger.info(f"✅ Mídia enviada para {clean_num} | Resp: {resp.text[:100]}")
                 return True
             else:
                 logger.error(f"❌ Erro envio mídia ({resp.status_code}): {resp.text[:300]}")

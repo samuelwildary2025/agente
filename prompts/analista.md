@@ -114,6 +114,9 @@ Retorne campo `opcoes` com lista se:
 | Coca Zero (sem tamanho) | COCA COLA ZERO 2L |
 | Frango / Galinha | FRANGO ABATIDO (KG) |
 | BANDEJA DANONE | IORGUTE BDJ POLPA NINHO |
+| **chinelo** | **HAVAIANAS** (qualquer tamanho) |
+| **babeado / barbeado** | **BARBEADOR** |
+| sandália | HAVAIANAS |
 
 ### Proibições Específicas
 - **Frango em Oferta**: Se encontrar produto com nome "Oferta" ou "Promoção" para Frango, **NÃO USE** (geralmente é venda apenas balcão). Use "Frango Abatido".

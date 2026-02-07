@@ -9,6 +9,7 @@ import re
 from typing import Dict, Any
 from arq import create_pool
 from arq.connections import RedisSettings
+from urllib.parse import urlparse
 
 from config.settings import settings
 from config.logger import setup_logger
@@ -221,12 +222,21 @@ class WorkerSettings:
     """Configuração do ARQ Worker"""
     
     # Conexão Redis (mesma do resto do sistema)
-    redis_settings = RedisSettings(
-        host=settings.redis_host,
-        port=settings.redis_port,
-        password=settings.redis_password,
-        database=settings.redis_db,
-    )
+    if getattr(settings, "redis_url_override", None):
+        u = urlparse(settings.redis_url)
+        redis_settings = RedisSettings(
+            host=u.hostname or settings.redis_host,
+            port=u.port or settings.redis_port,
+            password=u.password or settings.redis_password,
+            database=int((u.path or "/0").lstrip("/") or 0),
+        )
+    else:
+        redis_settings = RedisSettings(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            password=settings.redis_password,
+            database=settings.redis_db,
+        )
     
     # Funções que o worker pode executar
     functions = [process_message]

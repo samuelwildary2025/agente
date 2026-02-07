@@ -17,6 +17,7 @@ import io
 import asyncio
 from arq import create_pool
 from arq.connections import RedisSettings
+from urllib.parse import urlparse
 
 # Tenta importar pypdf para leitura de comprovantes
 try:
@@ -493,7 +494,21 @@ def _extract_incoming(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Na nova API, 'body' é o texto e 'mediaUrl' indica mídia
     mensagem_texto = payload.get("body") or payload.get("text")
     message_id = payload.get("id") or payload.get("messageid")
-    from_me = bool(payload.get("fromMe") or False)
+    def _parse_bool(v) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        if isinstance(v, (int, float)):
+            return v != 0
+        s = str(v).strip().lower()
+        if s in ("true", "1", "yes", "y", "sim"):
+            return True
+        if s in ("false", "0", "no", "n", "nao", "não", ""):
+            return False
+        return False
+
+    from_me = _parse_bool(payload.get("fromMe"))
     
     # Determinar tipo e buscar mídias aninhadas (Formato Baileys/Common)
     msg_keys = list(payload.keys())
@@ -962,6 +977,18 @@ async def startup_event():
     """Inicializa pool ARQ no startup"""
     global arq_pool
     logger.info("🚀 Inicializando ARQ Pool...")
+    if getattr(settings, "redis_url_override", None):
+        u = urlparse(settings.redis_url)
+        arq_pool = await create_pool(
+            RedisSettings(
+                host=u.hostname or settings.redis_host,
+                port=u.port or settings.redis_port,
+                password=u.password or settings.redis_password,
+                database=int((u.path or "/0").lstrip("/") or 0),
+            )
+        )
+        logger.info("✅ ARQ Pool inicializado com sucesso")
+        return
     arq_pool = await create_pool(
         RedisSettings(
             host=settings.redis_host,
@@ -1290,13 +1317,14 @@ async def webhook(req: Request, tasks: BackgroundTasks):
             if agent_number:
                 # Limpar para comparação
                 agent_clean = re.sub(r"\\D", "", agent_number)
+                tel_clean = re.sub(r"\\D", "", tel or "")
                 # Se a mensagem foi enviada PARA um cliente (não é conversa interna)
-                if tel and tel != agent_clean:
+                if tel_clean and tel_clean != agent_clean:
                     # Ativar cooldown - IA pausa por X minutos
                     ttl = settings.human_takeover_ttl  # Default: 900s (15min)
-                    set_agent_cooldown(tel, ttl)
-                    clear_cart(tel)  # Limpa o carrinho/sessão ao assumir
-                    logger.info(f"🙋 Human Takeover ativado para {tel} - IA pausa por {ttl//60}min - Carrinho limpo")
+                    set_agent_cooldown(tel_clean, ttl)
+                    clear_cart(tel_clean)  # Limpa o carrinho/sessão ao assumir
+                    logger.info(f"🙋 Human Takeover ativado para {tel_clean} - IA pausa por {ttl//60}min - Carrinho limpo")
             
             try: get_session_history(tel).add_ai_message(txt)
             except: pass

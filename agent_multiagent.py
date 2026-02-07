@@ -34,7 +34,10 @@ from tools.redis_tools import (
     clear_comprovante,
     get_saved_address,
     save_address,
-    get_order_session
+    get_order_session,
+    normalize_phone,
+    acquire_agent_lock,
+    release_agent_lock
 )
 from memory.hybrid_memory import HybridChatMessageHistory
 
@@ -861,7 +864,14 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
     """
     Executa o agente multi-agente. Suporta texto e imagem (via tag [MEDIA_URL: ...]).
     """
+    telefone = normalize_phone(telefone)
     logger.info(f"[MULTI-AGENT] Telefone: {telefone} | Msg: {mensagem[:50]}...")
+    lock_token = acquire_agent_lock(telefone)
+    if not lock_token:
+        return {
+            "output": "Estou finalizando sua última solicitação. Me manda só um instante e eu já te respondo.",
+            "error": "busy"
+        }
     
     # 1. Extrair URL de imagem se houver
     image_url = None
@@ -918,7 +928,7 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
                         break
             
             if ultima_pergunta_ia:
-                mensagem_expandida = f"O cliente respondeu '{clean_message}' CONFIRMANDO. Sua mensagem anterior foi: \"{ultima_pergunta_ia}...\". Se você sugeriu produtos com preços, VOCÊ DEVE CHAMAR add_item_tool AGORA para cada produto sugerido usando os dados (EAN, nome, preço) que você já tem do contexto anterior."
+                mensagem_expandida = f"O cliente respondeu '{clean_message}' CONFIRMANDO. Sua mensagem anterior foi: \"{ultima_pergunta_ia}...\". Se você sugeriu produtos, recupere as sugestões pendentes (get_pending_suggestions_tool) e só então adicione os itens confirmados (add_item_tool). Não invente preço."
                 logger.info(f"🔄 Mensagem curta expandida: '{clean_message}'")
         elif msg_lower in ["nao", "não", "n", "nope", "nao quero", "não quero"]:
             mensagem_expandida = f"O cliente respondeu '{clean_message}' (NEGATIVO). Pergunte se precisa de mais alguma coisa."
@@ -977,10 +987,15 @@ def run_agent_langgraph(telefone: str, mensagem: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Falha agente: {e}", exc_info=True)
         return {"output": "Tive um problema técnico, tente novamente.", "error": str(e)}
+    finally:
+        try:
+            release_agent_lock(telefone, lock_token)
+        except Exception:
+            pass
 
 
 def get_session_history(session_id: str) -> HybridChatMessageHistory:
-    return HybridChatMessageHistory(session_id=session_id, redis_ttl=settings.human_takeover_ttl or 900)
+    return HybridChatMessageHistory(session_id=normalize_phone(session_id), redis_ttl=settings.human_takeover_ttl or 900)
 
 # Alias para compatibilidade
 run_agent = run_agent_langgraph

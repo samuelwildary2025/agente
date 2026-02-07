@@ -3,6 +3,8 @@ Ferramentas Redis para buffer de mensagens e cooldown
 Apenas funcionalidades essenciais mantidas
 """
 import redis
+import time
+import uuid
 from typing import Optional, Dict, List, Tuple
 from config.settings import settings
 from config.logger import setup_logger
@@ -14,6 +16,72 @@ _redis_client: Optional[redis.Redis] = None
 # Buffer local em memória (fallback quando Redis não está disponível)
 _local_buffer: Dict[str, List[str]] = {}
 
+def normalize_phone(telefone: str) -> str:
+    telefone = "" if telefone is None else str(telefone)
+    digits = "".join(ch for ch in telefone if ch.isdigit())
+    return digits or telefone.strip()
+
+def _maybe_migrate_key(client: redis.Redis, old_key: str, new_key: str) -> None:
+    if not old_key or not new_key or old_key == new_key:
+        return
+    try:
+        if client.type(old_key) == "none":
+            return
+        if client.type(new_key) != "none":
+            return
+        moved = client.renamenx(old_key, new_key)
+        if moved:
+            logger.info(f"🔁 Redis key migrada: {old_key} -> {new_key}")
+    except Exception:
+        return
+
+def _lock_key(namespace: str, telefone: str) -> str:
+    return f"lock:{namespace}:{normalize_phone(telefone)}"
+
+def _release_lock(client: redis.Redis, key: str, token: str) -> bool:
+    script = """
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+    else
+        return 0
+    end
+    """
+    try:
+        res = client.eval(script, 1, key, token)
+        return bool(res)
+    except Exception:
+        return False
+
+def _acquire_lock(client: redis.Redis, key: str, ttl_seconds: int, wait_seconds: int) -> Optional[str]:
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + max(0, int(wait_seconds))
+    while True:
+        try:
+            ok = client.set(key, token, nx=True, ex=max(1, int(ttl_seconds)))
+        except Exception:
+            return None
+        if ok:
+            return token
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.15)
+
+def acquire_agent_lock(telefone: str, ttl_seconds: int = 600, wait_seconds: int = 120) -> Optional[str]:
+    client = get_redis_client()
+    if client is None:
+        return "NOLOCK"
+    telefone = normalize_phone(telefone)
+    return _acquire_lock(client, _lock_key("agent", telefone), ttl_seconds=ttl_seconds, wait_seconds=wait_seconds)
+
+def release_agent_lock(telefone: str, token: str) -> bool:
+    if token == "NOLOCK":
+        return True
+    client = get_redis_client()
+    if client is None:
+        return False
+    telefone = normalize_phone(telefone)
+    return _release_lock(client, _lock_key("agent", telefone), token)
+
 
 def get_redis_client() -> Optional[redis.Redis]:
     """
@@ -23,18 +91,15 @@ def get_redis_client() -> Optional[redis.Redis]:
     
     if _redis_client is None:
         try:
-            _redis_client = redis.Redis(
-                host=settings.redis_host,
-                port=settings.redis_port,
-                db=settings.redis_db,
-                password=settings.redis_password if settings.redis_password else None,
+            _redis_client = redis.from_url(
+                settings.redis_url,
                 decode_responses=True,
                 socket_connect_timeout=5,
-                socket_timeout=5
+                socket_timeout=5,
             )
             # Testar conexão
             _redis_client.ping()
-            logger.info(f"Conectado ao Redis: {settings.redis_host}:{settings.redis_port}")
+            logger.info("Conectado ao Redis")
         
         except redis.exceptions.ConnectionError as e:
             logger.error(f"Erro ao conectar ao Redis: {e}")
@@ -53,7 +118,7 @@ def get_redis_client() -> Optional[redis.Redis]:
 
 def buffer_key(telefone: str) -> str:
     """Retorna a chave da lista de buffer de mensagens no Redis."""
-    return f"msgbuf:{telefone}"
+    return f"msgbuf:{normalize_phone(telefone)}"
 
 
 def push_message_to_buffer(telefone: str, mensagem: str, message_id: str = None, ttl_seconds: int = 300) -> bool:
@@ -67,6 +132,7 @@ def push_message_to_buffer(telefone: str, mensagem: str, message_id: str = None,
     # Payload seguro
     payload = json.dumps({"text": mensagem, "mid": message_id})
 
+    telefone = normalize_phone(telefone)
     if client is None:
         # Fallback em memória
         msgs = _local_buffer.get(telefone)
@@ -92,6 +158,7 @@ def push_message_to_buffer(telefone: str, mensagem: str, message_id: str = None,
 def get_buffer_length(telefone: str) -> int:
     """Retorna o tamanho atual do buffer de mensagens para o telefone."""
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         # Fallback em memória
         msgs = _local_buffer.get(telefone) or []
@@ -110,6 +177,7 @@ def pop_all_messages(telefone: str) -> Tuple[List[str], Optional[str]]:
     """
     client = get_redis_client()
     import json
+    telefone = normalize_phone(telefone)
     
     texts = []
     # mids (plural) para marcar todos como lidos
@@ -159,7 +227,7 @@ def pop_all_messages(telefone: str) -> Tuple[List[str], Optional[str]]:
 
 def cooldown_key(telefone: str) -> str:
     """Chave do cooldown no Redis."""
-    return f"cooldown:{telefone}"
+    return f"cooldown:{normalize_phone(telefone)}"
 
 
 def set_agent_cooldown(telefone: str, ttl_seconds: int = 60) -> bool:
@@ -169,6 +237,7 @@ def set_agent_cooldown(telefone: str, ttl_seconds: int = 60) -> bool:
     - Armazena valor "1" com TTL (padrão 60s).
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         # Fallback: não há persistência real, apenas log
         logger.warning(f"[fallback] Cooldown não persistido (Redis indisponível) para {telefone}")
@@ -188,6 +257,7 @@ def is_agent_in_cooldown(telefone: str) -> Tuple[bool, int]:
     Verifica se há cooldown ativo e retorna (ativo, ttl_restante).
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return (False, -1)
     try:
@@ -217,7 +287,7 @@ MODIFICATION_TTL = 15 * 60  # 15 minutos para alterar após envio
 
 def order_session_key(telefone: str) -> str:
     """Chave da sessão de pedido no Redis."""
-    return f"order_session:{telefone}"
+    return f"order_session:{normalize_phone(telefone)}"
 
 
 def get_order_session(telefone: str) -> Optional[Dict]:
@@ -232,10 +302,14 @@ def get_order_session(telefone: str) -> Optional[Dict]:
         - order_id: ID do pedido (se enviado)
     """
     client = get_redis_client()
+    raw_phone = "" if telefone is None else str(telefone).strip()
+    telefone = normalize_phone(raw_phone)
     if client is None:
         return None
     
     try:
+        if raw_phone and raw_phone != telefone:
+            _maybe_migrate_key(client, f"order_session:{raw_phone}", f"order_session:{telefone}")
         key = order_session_key(telefone)
         data = client.get(key)
         if data:
@@ -252,10 +326,14 @@ def start_order_session(telefone: str) -> bool:
     TTL de 40 minutos.
     """
     client = get_redis_client()
+    raw_phone = "" if telefone is None else str(telefone).strip()
+    telefone = normalize_phone(raw_phone)
     if client is None:
         return False
     
     try:
+        if raw_phone and raw_phone != telefone:
+            _maybe_migrate_key(client, f"order_session:{raw_phone}", f"order_session:{telefone}")
         key = order_session_key(telefone)
         session = {
             "status": "building",
@@ -278,6 +356,7 @@ def mark_order_sent(telefone: str, order_id: str = None) -> bool:
     Também marca flag de pedido completado (2h TTL) para evitar mensagem de "não finalizado".
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -313,6 +392,7 @@ def mark_order_sent(telefone: str, order_id: str = None) -> bool:
 def clear_order_session(telefone: str) -> bool:
     """Remove a sessão de pedido."""
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -337,6 +417,7 @@ def get_order_context(telefone: str, mensagem: str = "") -> str:
         String com instrução para o agente baseada no estado da sessão.
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     session = get_order_session(telefone)
     
     # Detectar se é uma saudação/novo atendimento
@@ -407,6 +488,7 @@ def check_can_modify_order(telefone: str) -> Tuple[bool, str]:
     Returns:
         (pode_modificar, mensagem_explicativa)
     """
+    telefone = normalize_phone(telefone)
     session = get_order_session(telefone)
     
     if session is None:
@@ -429,6 +511,7 @@ def refresh_session_ttl(telefone: str) -> bool:
     Renova o TTL da sessão quando o cliente interage (se ainda em building).
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -451,7 +534,7 @@ def refresh_session_ttl(telefone: str) -> bool:
 
 def cart_key(telefone: str) -> str:
     """Chave da lista de itens do carrinho no Redis."""
-    return f"cart:{telefone}"
+    return f"cart:{normalize_phone(telefone)}"
 
 
 def add_item_to_cart(telefone: str, item_json: str) -> bool:
@@ -461,20 +544,37 @@ def add_item_to_cart(telefone: str, item_json: str) -> bool:
     Implementa DEDUPLICAÇÃO: Se item já existe, soma quantidade.
     """
     client = get_redis_client()
+    raw_phone = "" if telefone is None else str(telefone).strip()
+    telefone = normalize_phone(raw_phone)
     if client is None:
         return False
 
+    lock_token = None
     try:
+        if raw_phone and raw_phone != telefone:
+            _maybe_migrate_key(client, f"order_session:{raw_phone}", f"order_session:{telefone}")
+            _maybe_migrate_key(client, f"cart:{raw_phone}", f"cart:{telefone}")
+
+        lock_token = _acquire_lock(client, _lock_key("cart", telefone), ttl_seconds=30, wait_seconds=5)
+        if not lock_token:
+            logger.warning(f"⏳ Timeout aguardando lock do carrinho para {telefone}")
+            return False
+
         # Garante que existe sessão ativa
         session = get_order_session(telefone)
         if not session or session.get("status") != "building":
             start_order_session(telefone)
+            session = get_order_session(telefone)
 
         key = cart_key(telefone)
         
         # 1. Parse do novo item
         import json
-        new_item = json.loads(item_json)
+        try:
+            new_item = json.loads(item_json)
+        except Exception:
+            logger.error(f"Item JSON inválido para {telefone}")
+            return False
         new_prod_name = new_item.get("produto", "").strip().lower()
         
         # 2. Ler itens existentes para deduplicação
@@ -492,15 +592,35 @@ def add_item_to_cart(telefone: str, item_json: str) -> bool:
             # --- CENÁRIO: ATUALIZAÇÃO (MERGE) ---
             existing_item = current_items[found_index]
             
-            # Somar quantidades
-            # Somar quantidades
             try:
-                nova_qtd = float(existing_item.get("quantidade", 0)) + float(new_item.get("quantidade", 0))
+                qtd_old_raw = existing_item.get("quantidade", 0)
+                qtd_new_raw = new_item.get("quantidade", 0)
+                try:
+                    qtd_old = float(qtd_old_raw or 0)
+                except Exception:
+                    qtd_old = 0.0
+                try:
+                    qtd_new = float(qtd_new_raw or 0)
+                except Exception:
+                    qtd_new = 0.0
+
+                nova_qtd = qtd_old + qtd_new
                 existing_item["quantidade"] = nova_qtd
                 
                 # Somar unidades se houver
-                if "unidades" in existing_item and "unidades" in new_item:
-                    existing_item["unidades"] = int(existing_item["unidades"]) + int(new_item["unidades"])
+                unidades_old_raw = existing_item.get("unidades", 0)
+                unidades_new_raw = new_item.get("unidades", 0)
+                try:
+                    unidades_old = int(unidades_old_raw or 0)
+                except Exception:
+                    unidades_old = 0
+                try:
+                    unidades_new = int(unidades_new_raw or 0)
+                except Exception:
+                    unidades_new = 0
+
+                if unidades_old or unidades_new:
+                    existing_item["unidades"] = unidades_old + unidades_new
                 
                 # Atualizar preço (assume que o novo preço é o vigente)
                 existing_item["preco"] = new_item.get("preco", existing_item.get("preco"))
@@ -550,6 +670,12 @@ def add_item_to_cart(telefone: str, item_json: str) -> bool:
     except Exception as e:
         logger.error(f"Erro ao adicionar item ao carrinho: {e}")
         return False
+    finally:
+        try:
+            if client and lock_token:
+                _release_lock(client, _lock_key("cart", telefone), lock_token)
+        except Exception:
+            pass
 
 
 def get_cart_items(telefone: str) -> List[Dict]:
@@ -557,10 +683,14 @@ def get_cart_items(telefone: str) -> List[Dict]:
     Retorna todos os itens do carrinho como lista de dicionários.
     """
     client = get_redis_client()
+    raw_phone = "" if telefone is None else str(telefone).strip()
+    telefone = normalize_phone(raw_phone)
     if client is None:
         return []
 
     try:
+        if raw_phone and raw_phone != telefone:
+            _maybe_migrate_key(client, f"cart:{raw_phone}", f"cart:{telefone}")
         key = cart_key(telefone)
         # LRANGE 0 -1 pega toda a lista
         items_raw = client.lrange(key, 0, -1)
@@ -589,10 +719,21 @@ def remove_item_from_cart(telefone: str, index: int) -> bool:
     Abordagem segura: Ler tudo, remover no python, reescrever.
     """
     client = get_redis_client()
+    raw_phone = "" if telefone is None else str(telefone).strip()
+    telefone = normalize_phone(raw_phone)
     if client is None:
         return False
 
+    lock_token = None
     try:
+        if raw_phone and raw_phone != telefone:
+            _maybe_migrate_key(client, f"cart:{raw_phone}", f"cart:{telefone}")
+
+        lock_token = _acquire_lock(client, _lock_key("cart", telefone), ttl_seconds=30, wait_seconds=5)
+        if not lock_token:
+            logger.warning(f"⏳ Timeout aguardando lock do carrinho para {telefone}")
+            return False
+
         key = cart_key(telefone)
         items = client.lrange(key, 0, -1)
         
@@ -622,21 +763,42 @@ def remove_item_from_cart(telefone: str, index: int) -> bool:
     except Exception as e:
         logger.error(f"Erro ao remover item do carrinho: {e}")
         return False
+    finally:
+        try:
+            if client and lock_token:
+                _release_lock(client, _lock_key("cart", telefone), lock_token)
+        except Exception:
+            pass
 
 
 def clear_cart(telefone: str) -> bool:
     """Remove todo o carrinho."""
     client = get_redis_client()
+    raw_phone = "" if telefone is None else str(telefone).strip()
+    telefone = normalize_phone(raw_phone)
     if client is None:
         return False
 
+    lock_token = None
     try:
+        if raw_phone and raw_phone != telefone:
+            _maybe_migrate_key(client, f"cart:{raw_phone}", f"cart:{telefone}")
+        lock_token = _acquire_lock(client, _lock_key("cart", telefone), ttl_seconds=30, wait_seconds=5)
+        if not lock_token:
+            logger.warning(f"⏳ Timeout aguardando lock do carrinho para {telefone}")
+            return False
         client.delete(cart_key(telefone))
         logger.info(f"🛒 Carrinho limpo para {telefone}")
         return True
     except Exception as e:
         logger.error(f"Erro ao limpar carrinho: {e}")
         return False
+    finally:
+        try:
+            if client and lock_token:
+                _release_lock(client, _lock_key("cart", telefone), lock_token)
+        except Exception:
+            pass
 
 
 # ============================================
@@ -645,7 +807,7 @@ def clear_cart(telefone: str) -> bool:
 
 def comprovante_key(telefone: str) -> str:
     """Chave para armazenar URL do comprovante PIX."""
-    return f"comprovante:{telefone}"
+    return f"comprovante:{normalize_phone(telefone)}"
 
 
 def set_comprovante(telefone: str, url: str) -> bool:
@@ -661,6 +823,7 @@ def set_comprovante(telefone: str, url: str) -> bool:
         True se salvo com sucesso
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -682,6 +845,7 @@ def get_comprovante(telefone: str) -> Optional[str]:
         URL do comprovante ou None
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return None
     
@@ -699,6 +863,7 @@ def get_comprovante(telefone: str) -> Optional[str]:
 def clear_comprovante(telefone: str) -> bool:
     """Remove o comprovante do cliente (após finalizar pedido)."""
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -716,7 +881,7 @@ def clear_comprovante(telefone: str) -> bool:
 
 def address_key(telefone: str) -> str:
     """Chave para armazenar endereço do cliente temporariamente."""
-    return f"address:{telefone}"
+    return f"address:{normalize_phone(telefone)}"
 
 
 def set_address(telefone: str, endereco: str) -> bool:
@@ -725,6 +890,7 @@ def set_address(telefone: str, endereco: str) -> bool:
     TTL de 2 horas.
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -741,6 +907,7 @@ def set_address(telefone: str, endereco: str) -> bool:
 def get_address(telefone: str) -> Optional[str]:
     """Recupera o endereço salvo do cliente."""
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return None
     
@@ -758,6 +925,7 @@ def get_address(telefone: str) -> Optional[str]:
 def clear_address(telefone: str) -> bool:
     """Remove o endereço salvo."""
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         return False
     
@@ -789,7 +957,7 @@ SUGGESTIONS_TTL = 600  # 10 minutos
 
 def suggestions_key(telefone: str) -> str:
     """Chave para armazenar produtos sugeridos."""
-    return f"suggestions:{telefone}"
+    return f"suggestions:{normalize_phone(telefone)}"
 
 
 def save_suggestions(telefone: str, products: List[Dict]) -> bool:
@@ -805,6 +973,7 @@ def save_suggestions(telefone: str, products: List[Dict]) -> bool:
         True se salvo com sucesso
     """
     client = get_redis_client()
+    telefone = normalize_phone(telefone)
     if client is None:
         logger.warning(f"[fallback] Sugestões não persistidas (Redis indisponível) para {telefone}")
         return False

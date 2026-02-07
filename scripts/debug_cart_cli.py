@@ -13,12 +13,58 @@ from pathlib import Path
 root_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(root_dir))
 
-from tools.redis_tools import get_cart_items, get_order_session, get_address, get_comprovante
+from tools.redis_tools import (
+    get_cart_items,
+    get_order_session,
+    get_address,
+    get_comprovante,
+    get_redis_client,
+    normalize_phone,
+)
 from config.settings import settings
 
+def _inspect_raw_keys(raw_phone: str):
+    client = get_redis_client()
+    if client is None:
+        print("\n⚠️ Redis indisponível. Não foi possível inspecionar chaves cruas.")
+        return
+
+    norm = normalize_phone(raw_phone)
+    candidates = {
+        "cart_raw": f"cart:{raw_phone}",
+        "cart_norm": f"cart:{norm}",
+        "order_session_raw": f"order_session:{raw_phone}",
+        "order_session_norm": f"order_session:{norm}",
+        "suggestions_raw": f"suggestions:{raw_phone}",
+        "suggestions_norm": f"suggestions:{norm}",
+        "comprovante_raw": f"comprovante:{raw_phone}",
+        "comprovante_norm": f"comprovante:{norm}",
+        "address_raw": f"address:{raw_phone}",
+        "address_norm": f"address:{norm}",
+    }
+
+    print("\n🧪 [CHAVES REDIS] (raw vs normalizado)")
+    for label, key in candidates.items():
+        try:
+            t = client.type(key)
+            if t == "none":
+                continue
+            ttl = client.ttl(key)
+            extra = ""
+            if t == "list":
+                extra = f" | len={client.llen(key)}"
+            elif t == "string":
+                val = client.get(key)
+                extra = f" | value_preview={str(val)[:80]}"
+            print(f"- {label}: {key} | type={t} | ttl={ttl}{extra}")
+        except Exception as e:
+            print(f"- {label}: erro lendo {key}: {e}")
+
 def inspect_client(phone):
-    print(f"\n🔍 Inspecionando dados para: {phone}")
+    norm = normalize_phone(phone)
+    print(f"\n🔍 Inspecionando dados para: {phone} (normalizado: {norm})")
     print(f"🌍 Redis Host: {settings.redis_host}:{settings.redis_port}")
+    _inspect_raw_keys(phone)
     
     # 1. Sessão
     session = get_order_session(phone)

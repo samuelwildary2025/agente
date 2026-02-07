@@ -4,15 +4,57 @@ Substitui a busca por trigram (db_search.py) por busca semântica com embeddings
 """
 import json
 import psycopg2
+from pathlib import Path
 from psycopg2.extras import RealDictCursor
 from openai import OpenAI
 from config.settings import settings
 from config.logger import setup_logger
+from typing import Dict, Optional
 
 logger = setup_logger(__name__)
 
 # Cliente OpenAI para gerar embeddings
 _openai_client = None
+_TERM_TRANSLATIONS_CACHE: Optional[Dict[str, object]] = None
+
+def _load_extra_term_translations() -> Dict[str, str]:
+    global _TERM_TRANSLATIONS_CACHE
+    path = str(getattr(settings, "term_translations_path", "prompts/term_translations.json") or "").strip()
+    if not path:
+        return {}
+
+    file_path = Path(path)
+    if not file_path.is_absolute():
+        base_dir = Path(__file__).resolve().parent.parent
+        file_path = base_dir / file_path
+
+    try:
+        stat = file_path.stat()
+    except Exception:
+        return {}
+
+    mtime = int(stat.st_mtime)
+    if _TERM_TRANSLATIONS_CACHE and _TERM_TRANSLATIONS_CACHE.get("mtime") == mtime:
+        return _TERM_TRANSLATIONS_CACHE.get("data") or {}
+
+    try:
+        raw = file_path.read_text(encoding="utf-8").strip()
+        parsed = json.loads(raw) if raw else {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        cleaned: Dict[str, str] = {}
+        for k, v in parsed.items():
+            if isinstance(k, str) and isinstance(v, str):
+                kk = k.strip()
+                vv = v.strip()
+                if kk and vv:
+                    cleaned[kk] = vv
+        _TERM_TRANSLATIONS_CACHE = {"mtime": mtime, "data": cleaned}
+        return cleaned
+    except Exception as e:
+        logger.error(f"Erro lendo term_translations.json: {e}")
+        _TERM_TRANSLATIONS_CACHE = {"mtime": mtime, "data": {}}
+        return {}
 
 # FlashRank removido - O Analista (sub-agente LLM) decide o melhor produto
 
@@ -76,8 +118,7 @@ def search_products_vector(query: str, limit: int = 20) -> str:
     # Connection string do banco vetorial
     conn_str = settings.vector_db_connection_string
     if not conn_str:
-        # Fallback para o banco de produtos padrão
-        conn_str = settings.products_db_connection_string
+        conn_str = getattr(settings, "products_db_connection_string", None)
     
     if not conn_str:
         return "Erro: String de conexão do banco vetorial não configurada."
@@ -100,164 +141,7 @@ def search_products_vector(query: str, limit: int = 20) -> str:
        
     ]
     
-    # Traduções de termos comuns para abreviações usadas no banco
-    TERM_TRANSLATIONS = {
-        "absorvente": "abs",
-        "achocolatado": "achoc",
-        "refrigerante": "refrig",
-        "amaciante": "amac",
-        "desodorante": "desod",
-        "shampoo": "sh",
-        "condicionador": "cond",
-        "hotdog": "pao hot dog maxpaes",
-        "cachorro quente": "pao hot dog maxpaes",
-        "cachorro-quente": "pao hot dog maxpaes",
-        "musarela": "queijo mussarela",
-        "muçarela": "queijo mussarela", 
-        "mussarela": "queijo mussarela",
-        "presunto": "presunto fatiado",
-        # Biscoitos e bolachas
-        "creme crack": "bolacha cream cracker",
-        "cream crack": "bolacha cream cracker",
-        "cracker": "bolacha cream cracker",
-        # Biscoitos - PADRÃO AMORI RECHEADO
-        "biscoito chocolate": "biscoito recheado amori chocolate",
-        "biscoito de chocolate": "biscoito recheado amori chocolate",
-        "biscoito chocolate pequeno": "biscoito recheado amori chocolate pequeno",
-
-        "biscoito de chocolate pequeno": "biscoito recheado amori chocolate pequeno",
-        # Cookies - PRIORIZAR BAUDUCCO
-        "cookies": "cookies bauducco original",
-        "cookie": "cookies bauducco original",
-        "biscoito cookies": "cookies bauducco original",
-        # Refrigerantes - MELHORADO
-        "guarana": "refrig guarana antarctica",
-        "coca cola": "refrig coca cola pet",
-        "coca-cola": "refrig coca cola pet",
-        "coca cola 2 litros": "refrig coca cola pet 2l",
-        "coca-cola 2 litros": "refrig coca cola pet 2l",
-        "coca cola 2l": "refrig coca cola pet 2l",
-        "coca-cola 2l": "refrig coca cola pet 2l",
-        "fanta": "refrig fanta",
-        "sprite": "refrig sprite",
-        # Cuscuz -> Flocão
-        "cuscuz": "flocao",
-        "pacote de cuscuz": "flocao",
-        # Padaria - NOVO
-        "carioquinha": "pao frances",
-        "carioquinhas": "pao frances",
-        "pao carioquinha": "pao frances",
-        "pão carioquinha": "pao frances",
-        "pão francês": "pao frances",
-        "pao frances": "pao frances",
-        # Carnes e hambúrguer - NOVO
-        "hamburguer": "hamburguer carne",
-        "hamburger": "hamburguer carne",
-        "carne de hamburguer": "hamburguer carne moida",
-        "carne hamburguer": "hamburguer carne moida",
-        "carne de hamburguer": "hamburguer carne moida",
-        "carne de hamburguer": "hamburguer carne moida",
-        "carne hamburguer": "hamburguer carne moida",
-        # Snacks / Salgadinhos
-        "batata rufles": "salgadinho batata ruffles",
-        "batata ruffles": "salgadinho batata ruffles",
-        "rufles": "salgadinho batata ruffles",
-        "ruffles": "salgadinho batata ruffles",
-        # Limpeza - NOVO (Qboa/Kiboa)
-        "qboa": "agua sanitaria",
-        "kiboa": "agua sanitaria",
-        "qui boa": "agua sanitaria",
-        "quiboa": "agua sanitaria",
-        # Higiene pessoal - NOVO (Prestobarba)
-        "prestobarba": "barbeador aparelho de barbear",
-        "presto barba": "barbeador aparelho de barbear",
-        "barbeador prestobarba": "barbeador aparelho de barbear",
-        "aparelho de barbear": "barbeador aparelho de barbear",
-        "escova": "esc dent",
-        "escova de dente": "esc dent",
-        "refrescou": "suco em po refresco",
-        "refresco": "suco em po refresco",
-        "pao de saco": "pao de forma",
-        "pão de saco": "pao de forma",
-        # "pacote de pao" REMOVIDO - cliente quer hot dog ou hamburguer, agente deve perguntar
-        "pao para hamburguer": "pao hamburguer",
-        "pao de hamburguer": "pao hamburguer",
-        "pao para hot dog": "pao hot dog",
-        "pao de hot dog": "pao hot dog",
-        "pao de cachorro quente": "pao hot dog",
-        # Tabacaria
-        "carteira": "maco",
-        "maço": "maco",
-        # Laticínios
-        "leite de saco": "leite liquido",
-        "leite saco": "leite liquido",
-        "leite em caixa": "leite liquido",
-        "leite de caixa": "leite liquido",
-        "leite caixa": "leite liquido",
-        # Normalização de acentos (banco usa sem acento)
-        "açúcar": "acucar cristal",
-        "açucar": "acucar cristal",
-        "acucar": "acucar cristal",  # SEM ACENTO - priorizar cristal sobre demerara
-        "café": "cafe",
-        "maçã": "maca",
-        "feijão": "feijao",
-        # Frutas - PRIORIDADES
-        "mamao": "mamao papaya",
-        "mamão": "mamao papaya",
-        "papaia": "mamao papaya",
-        "melancia": "melancia",
-        "limao": "limao taiti",
-        "limão": "limao taiti",
-        # 🔄 NORMALIZAÇÃO DE PLURAL: "cebolas" -> "cebola" (ANTES do boost de categoria)
-        "cebolas": "cebola",
-        "tomates": "tomate",
-        "batatas": "batata",
-        "limoes": "limao",
-        "limões": "limao",
-        "abacaxis": "abacaxi",
-        "laranjas": "laranja",
-        "bananas": "banana",
-        "maçãs": "maca",
-        "macas": "maca",
-        # Café - PRIORIZAR TRADICIONAL sobre descafeinado
-        "cafe pilao": "cafe pilao tradicional 500g",
-        "pilao": "cafe pilao tradicional 500g",
-        "cafe melitta": "cafe melitta tradicional",
-        "melitta": "cafe melitta tradicional",
-        "cafe 3 coracoes": "cafe 3 coracoes tradicional",
-        "3 coracoes": "cafe 3 coracoes tradicional",
-        # Cervejas - Corrigido para formato do banco (LT = lata, LN = long neck, GRF = garrafa)
-        "cerveja": "cerveja lt 350ml",
-        "cerveja lata": "cerveja lt 350ml",
-        "cerveja latinha": "cerveja lt 350ml",
-        "latinha cerveja": "cerveja lt 350ml",
-        "latinha de cerveja": "cerveja lt 350ml",
-        "cerveja garrafa": "cerveja grf 600ml",
-        "cervejas": "cerveja lt 350ml",
-        # Long neck (várias grafias)
-        "long neck": "cerveja ln 330ml",
-        "longneck": "cerveja ln 330ml",
-        "longneque": "cerveja ln 330ml",
-        "long neque": "cerveja ln 330ml",
-        "cerveja long neck": "cerveja ln 330ml",
-        # Marcas específicas
-        "skol": "cerveja skol lt",
-        "brahma": "cerveja brahma chopp lt",
-        "antartica": "cerveja antarctica lt",
-        "heineken": "cerveja heineken lt",
-        "budweiser": "cerveja budweiser lt",
-        "amstel": "cerveja amstel lt",
-        "bohemia": "cerveja bohemia lt",
-        # Marcas locais / Correções específicas
-        # A remoção de acentos é GENÉRICA (linha 236). Aqui só expandimos marcas abreviadas.
-        "arroz vo": "arroz vo olimpio",  # "vo" → marca completa
-        "vo olimpio": "vo olimpio",  # Manter se já vier completo
-        # Nescal = Nescau Líquido (caixinha pronta pra beber)
-        "nescal": "achoc liq nescau",
-        "nescau": "achoc liq nescau",  # Se pedir "nescau" solto, priorizar caixinha
-        "nescau po": "achoc po nescau",  # Se especificar pó, retorna pó
-        "nescau lata": "achoc po nescau",  # Lata = pó
-    }
+    TERM_TRANSLATIONS = _load_extra_term_translations()
     
     
     # ---------------------------------------------------------
@@ -270,94 +154,95 @@ def search_products_vector(query: str, limit: int = 20) -> str:
         nfkd_form = unicodedata.normalize('NFKD', input_str)
         return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
+    raw_query = query
     query = remove_accents(query)
     query_lower = query.lower().strip()
-    enhanced_query = query
-    
-    # Primeiro, aplicar traduções de termos (ORDENAR por tamanho decrescente para pegar matches maiores primeiro)
-    sorted_translations = sorted(TERM_TRANSLATIONS.items(), key=lambda x: len(x[0]), reverse=True)
-    for term, abbreviation in sorted_translations:
-        # Remover acentos também das chaves do dicionário para garantir match
-        term_clean = remove_accents(term)
-        if term_clean in query_lower:
-            # SUBSTITUIÇÃO PARCIAL: Preserva outras palavras (ex: "Coca Cola Zero" -> "refrig coca cola pet Zero")
-            # Usa replace para trocar apenas o termo encontrado
-            enhanced_query = enhanced_query.lower().replace(term_clean, abbreviation)
-            # Atualiza query principal também para refletir a mudança
-            query = enhanced_query
-            logger.info(f"🔄 [TRADUÇÃO PARCIAL] '{term_clean}' → '{abbreviation}' | Result: '{enhanced_query}'")
-            # Não dar break, permitir outras substituições se não conflitarem (mas cuidado com loop). 
-            # Como ordenamos por tamanho, os maiores já foram.
-            # Mas para segurança, melhor parar após a primeira substituição principal para evitar salada.
-            break
-    
-    # Se a busca é por um produto hortifruti, adiciona contexto para melhorar a relevância
-    # Se a busca é por um produto hortifruti, adiciona contexto para melhorar a relevância
-    # MAS: Se a busca contém termos de produtos processados, NÃO aplicar boost de hortifruti
-    PROCESSED_TERMS = [
-        "doce", "suco", "molho", "extrato", "polpa", "geleia", "compota", "refresco", "refrescou",
-        "rufles", "ruffles", "batata palha", "batata chips", "chips", "salgadinho", "snack",
-        "cheetos", "fandangos", "doritos", "pringles", "stax", "baconzitos", "cebolitos"
-    ]
-    is_processed = any(term in query_lower for term in PROCESSED_TERMS)
-    
-    if not is_processed:
-        import re
-        query_to_check = query.lower()
-        for keyword in HORTIFRUTI_KEYWORDS:
-            # Usar regex para buscar palavra exata (evita "maca" em "macarrao")
-            if re.search(r'\b' + re.escape(keyword) + r'\b', query_to_check):
-                # Adiciona contexto de categoria para melhorar a similaridade
-                if keyword in ["frango"]:
-                    enhanced_query = f"{query} açougue carnes abatido resfriado"
-                elif keyword in ["carne", "peixe"]:
-                    enhanced_query = f"{query} açougue carnes"
-                elif keyword in ["ovo", "leite", "queijo", "manteiga", "iogurte"]:
-                    enhanced_query = f"{query} laticínios"
-                else:
-                    enhanced_query = f"{query} hortifruti legumes verduras frutas"
-                logger.info(f"🎯 [BOOST] Query melhorada: '{enhanced_query}'")
+
+    mode = str(getattr(settings, "vector_search_mode", "exact") or "exact").lower().strip()
+    use_fallback = bool(getattr(settings, "vector_search_fallback", True))
+
+    def _apply_translations(q: str) -> str:
+        q_lower_local = q.lower().strip()
+        out = q
+        sorted_translations = sorted(TERM_TRANSLATIONS.items(), key=lambda x: len(x[0]), reverse=True)
+        for term, abbreviation in sorted_translations:
+            term_clean = remove_accents(term)
+            if term_clean in q_lower_local:
+                out = out.lower().replace(term_clean, abbreviation)
+                logger.info(f"🔄 [TRADUÇÃO PARCIAL] '{term_clean}' → '{abbreviation}' | Result: '{out}'")
                 break
-    else:
-        logger.info(f"⏭️ [BOOST SKIP] Produto processado detectado, pulando boost hortifruti")
-    
-    logger.info(f"🔍 [VECTOR SEARCH] Buscando: '{query}'" + (f" → '{enhanced_query}'" if enhanced_query != query else ""))
+        return out
+
+    def _apply_boost(q: str) -> str:
+        q_lower_local = q.lower()
+        PROCESSED_TERMS = [
+            "doce", "suco", "molho", "extrato", "polpa", "geleia", "compota", "refresco", "refrescou",
+            "rufles", "ruffles", "batata palha", "batata chips", "chips", "salgadinho", "snack",
+            "cheetos", "fandangos", "doritos", "pringles", "stax", "baconzitos", "cebolitos"
+        ]
+        is_processed = any(term in q_lower_local for term in PROCESSED_TERMS)
+
+        if is_processed:
+            logger.info("⏭️ [BOOST SKIP] Produto processado detectado, pulando boost hortifruti")
+            return q
+
+        import re
+        query_to_check = q.lower()
+        for keyword in HORTIFRUTI_KEYWORDS:
+            if re.search(r"\b" + re.escape(keyword) + r"\b", query_to_check):
+                if keyword in ["frango"]:
+                    boosted = f"{q} açougue carnes abatido resfriado"
+                elif keyword in ["carne", "peixe"]:
+                    boosted = f"{q} açougue carnes"
+                elif keyword in ["ovo", "leite", "queijo", "manteiga", "iogurte"]:
+                    boosted = f"{q} laticínios"
+                else:
+                    boosted = f"{q} hortifruti legumes verduras frutas"
+                logger.info(f"🎯 [BOOST] Query melhorada: '{boosted}'")
+                return boosted
+        return q
+
+    enhanced_query = query
+    if mode != "exact":
+        enhanced_query = _apply_translations(enhanced_query)
+        if mode == "assist":
+            enhanced_query = _apply_boost(enhanced_query)
+
+    logger.info(f"🔍 [VECTOR SEARCH] mode={mode} | query='{query}'" + (f" → '{enhanced_query}'" if enhanced_query != query else ""))
     
     try:
-        # 1. Gerar embedding da query (com boost se aplicável)
-        query_embedding = _generate_embedding(enhanced_query)
-        # 2. BUSCA HÍBRIDA usando função PostgreSQL (FTS + Vetorial com RRF)
-        with psycopg2.connect(conn_str) as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Converter embedding para string no formato pgvector
-                embedding_str = f"[{','.join(map(str, query_embedding))}]"
-                
-                # 🔥 BUSCA HÍBRIDA V2: FTS + Vetorial + Boost para HORTI-FRUTI/FRIGORIFICO
-                # Usa RRF (Reciprocal Rank Fusion) para combinar rankings
-                # - full_text_weight: peso da busca por texto
-                # - semantic_weight: peso da busca vetorial
-                # - setor_boost: +0.5 para HORTI-FRUTI e FRIGORIFICO
-                sql = """
-                    SELECT 
-                        h.text,
-                        h.metadata,
-                        h.score as similarity,
-                        h.rank
-                    FROM hybrid_search_v2(
-                        %s,                    -- query_text
-                        %s::vector,            -- query_embedding
-                        %s,                    -- match_count
-                        1.0,                   -- full_text_weight
-                        1.0,                   -- semantic_weight
-                        0.5,                   -- setor_boost (HORTI-FRUTI/FRIGORIFICO)
-                        50                     -- rrf_k (parâmetro RRF)
-                    ) h
-                """
-                
-                logger.info(f"🔀 [HYBRID SEARCH] Query: '{query}' → '{enhanced_query}'")
-                
-                cur.execute(sql, (enhanced_query, embedding_str, limit))
-                results = cur.fetchall()
+        def _hybrid_search(text_query: str):
+            query_embedding = _generate_embedding(text_query)
+            with psycopg2.connect(conn_str) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    embedding_str = f"[{','.join(map(str, query_embedding))}]"
+                    sql = """
+                        SELECT 
+                            h.text,
+                            h.metadata,
+                            h.score as similarity,
+                            h.rank
+                        FROM hybrid_search_v2(
+                            %s,                    -- query_text
+                            %s::vector,            -- query_embedding
+                            %s,                    -- match_count
+                            1.0,                   -- full_text_weight
+                            1.0,                   -- semantic_weight
+                            0.5,                   -- setor_boost (HORTI-FRUTI/FRIGORIFICO)
+                            50                     -- rrf_k (parâmetro RRF)
+                        ) h
+                    """
+                    cur.execute(sql, (text_query, embedding_str, limit))
+                    return cur.fetchall()
+
+        results = _hybrid_search(enhanced_query)
+
+        if (not results) and mode == "exact" and use_fallback:
+            fallback_query = _apply_translations(query)
+            fallback_query = _apply_boost(fallback_query)
+            if fallback_query != enhanced_query:
+                logger.info(f"🛟 [VECTOR SEARCH] fallback: '{enhanced_query}' → '{fallback_query}'")
+                results = _hybrid_search(fallback_query)
                 
                 logger.info(f"🔍 [VECTOR SEARCH] Encontrados {len(results)} resultados")
                 
@@ -384,23 +269,11 @@ def search_products_vector(query: str, limit: int = 20) -> str:
                         cat_match = re.search(r'"categoria1":\s*"([^"]+)"', text)
                         cat = cat_match.group(1) if cat_match else ""
                         logger.debug(f"   {i+1}. [{sim:.4f}] {nome} | {cat}")
-                
-                # 🔄 RETRY AUTOMÁTICO - DESABILITADO POR PERFORMANCE (Lentidão de 10s+)
-                # O loop palavra-por-palavra fazia múltiplas chamadas de embedding sequenciais.
-                # A busca híbrida inicial + FlashRank deve ser suficiente.
-                pass
-                # if results and results[0].get("similarity", 0) < MIN_SCORE_THRESHOLD:
-                #    ... (Código removido para otimização) ...
-                
-                if not results:
-                    return "Nenhum produto encontrado com esse termo."
 
-                # FlashRank REMOVIDO - O Analista (LLM) decide o melhor produto
-                # GENERIC BOOST REMOVIDO - O Analista (LLM) decide o melhor produto
-                # Os resultados já vêm ordenados pela busca híbrida (FTS + Vetorial)
+        if not results:
+            return "Nenhum produto encontrado com esse termo."
 
-                # 3. Processar e formatar resultados
-                return _format_results(results)
+        return _format_results(results)
     
     except Exception as e:
         logger.error(f"❌ Erro na busca vetorial: {e}")

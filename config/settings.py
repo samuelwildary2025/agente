@@ -3,6 +3,7 @@ Configurações do Agente de Supermercado
 Carrega variáveis de ambiente usando Pydantic Settings
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
 from typing import Optional
 
 
@@ -34,9 +35,13 @@ class Settings(BaseSettings):
     postgres_message_limit: int = 5
     
     # Banco Vetorial de Produtos (Postgres - pgvector)
-    vector_db_connection_string: Optional[str] = "postgres://postgres:Theo2023...@31.97.252.6:2022/projeto_queiroz?sslmode=disable"
+    vector_db_connection_string: Optional[str] = None
+    vector_search_mode: str = "exact"
+    vector_search_fallback: bool = True
+    vector_search_term_mappings: bool = False
     
     # Redis
+    redis_url_override: Optional[str] = Field(default=None, alias="REDIS_URL")
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_password: Optional[str] = None
@@ -50,8 +55,8 @@ class Settings(BaseSettings):
     estoque_ean_base_url: str = "http://45.178.95.233:5001/api/Produto/GetProdutosEAN"
 
     # EAN Smart Responder (Supabase Functions)
-    smart_responder_url: str = "https://gmhpegzldsuibmmvqbxs.supabase.co/functions/v1/smart-responder"
-    smart_responder_token: str = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtaHBlZ3psZHN1aWJtbXZxYnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4NDE4MzQsImV4cCI6MjA3ODQxNzgzNH0.1V-CGTIw89BgMe0nc83aGNi7NwnI6gYD4kCx6IW0U70"
+    smart_responder_url: Optional[str] = None
+    smart_responder_token: Optional[str] = None
     smart_responder_auth: str = ""
     smart_responder_apikey: str = ""
     pre_resolver_enabled: bool = False
@@ -82,11 +87,34 @@ class Settings(BaseSettings):
     agent_prompt_path: Optional[str] = "prompts/vendedor.md"
 
     product_context_path: Optional[str] = "prompts/product_context.json"
+    term_translations_path: str = "prompts/term_translations.json"
+
+    @field_validator(
+        "openai_api_base",
+        "supermercado_base_url",
+        "estoque_ean_base_url",
+        "uazapi_base_url",
+        "smart_responder_url",
+        "smart_responder_token",
+        "supermercado_auth_token",
+        "redis_url_override",
+        mode="before",
+    )
+    @classmethod
+    def _strip_wrapping_chars(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        if len(s) >= 2 and ((s[0] == s[-1] == "`") or (s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+            s = s[1:-1].strip()
+        return s
 
 
     @property
     def redis_url(self) -> str:
         """Monta a URL de conexão do Redis baseada nas variáveis"""
+        if self.redis_url_override:
+            return self.redis_url_override
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 

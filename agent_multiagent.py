@@ -37,7 +37,10 @@ from tools.redis_tools import (
     get_order_session,
     normalize_phone,
     acquire_agent_lock,
-    release_agent_lock
+    release_agent_lock,
+    clear_order_session,
+    start_order_session,
+    clear_suggestions
 )
 from memory.hybrid_memory import HybridChatMessageHistory
 
@@ -151,6 +154,19 @@ def add_item_tool(telefone: str, produto: str, quantidade: float = 1.0, observac
          else:
              return f"✅ Adicionado: {quantidade} {produto} - Total: R$ {valor_estimado:.2f}"
     return "❌ Erro ao adicionar item."
+
+@tool
+def reset_pedido_tool(telefone: str) -> str:
+    """
+    Zera o pedido do cliente (carrinho, sessão, comprovante e sugestões) e inicia uma nova sessão.
+    """
+    telefone = normalize_phone(telefone)
+    clear_cart(telefone)
+    clear_order_session(telefone)
+    clear_comprovante(telefone)
+    clear_suggestions(telefone)
+    start_order_session(telefone)
+    return "✅ Pedido zerado com sucesso! Pode me enviar a nova lista de itens."
 
 @tool
 def view_cart_tool(telefone: str) -> str:
@@ -473,6 +489,7 @@ VENDEDOR_TOOLS = [
     # estoque_preco_alias, -> Removido: Use busca_analista (Analista)
     busca_analista_tool,
     # estoque_tool, -> (Já estava encapsulado na busca_analista, confirmando remoção completa do acesso direto)
+    reset_pedido_tool,
     add_item_tool,
     view_cart_tool,
     remove_item_tool,

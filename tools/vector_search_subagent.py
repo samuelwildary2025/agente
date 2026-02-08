@@ -72,6 +72,13 @@ def run_vector_search_subagent(query: str, limit: int = 15, thread_id: Optional[
     def _strip_leading_qty(text: str) -> str:
         import re
         s = (text or "").strip()
+        kg_prefix = re.match(r"^\s*\d+(?:[.,]\d+)?\s*(kg|kilo|quilo|quilos)\b\s*(de\s+)?", s, flags=re.IGNORECASE)
+        if kg_prefix:
+            s = s[kg_prefix.end():].strip()
+            if s and not re.search(r"\bkg\b", s, flags=re.IGNORECASE):
+                s = f"{s} kg"
+            return s.strip()
+
         s = re.sub(r"^\s*\d+(?:[.,]\d+)?\s*[xX]?\s+", "", s)
         s = re.sub(r"^\s*(aprox\.?|aproximadamente)\s+", "", s, flags=re.IGNORECASE)
         return s.strip()

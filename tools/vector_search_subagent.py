@@ -69,6 +69,15 @@ def run_vector_search_subagent(query: str, limit: int = 15, thread_id: Optional[
     if not q:
         return "Nenhum produto encontrado."
 
+    def _strip_leading_qty(text: str) -> str:
+        import re
+        s = (text or "").strip()
+        s = re.sub(r"^\s*\d+(?:[.,]\d+)?\s*[xX]?\s+", "", s)
+        s = re.sub(r"^\s*(aprox\.?|aproximadamente)\s+", "", s, flags=re.IGNORECASE)
+        return s.strip()
+
+    q = _strip_leading_qty(q)
+
     if getattr(settings, "vector_search_term_mappings", False) and getattr(settings, "vector_search_mode", "exact").lower() != "exact":
         TERM_MAPPINGS = {
             "pacote de pao": "pao hot dog",

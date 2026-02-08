@@ -203,6 +203,9 @@ def search_products_vector(query: str, limit: int = 20) -> str:
         return q
 
     enhanced_query = query
+    if query_lower in ("nescal", "nescau"):
+        enhanced_query = f"{query} achoc liq nescau 180ml"
+        logger.info(f"🎯 [PREFERÊNCIA] Termo '{query_lower}' direcionado para caixinha 180ml")
     if mode != "exact":
         enhanced_query = _apply_translations(enhanced_query)
         if mode == "assist":

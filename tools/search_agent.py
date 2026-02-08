@@ -119,6 +119,8 @@ def _openai_model_supports_temperature(model: str) -> bool:
     m = (model or "").lower().strip()
     if m.startswith("gpt-5") or m.startswith("gpt5") or "gpt-5" in m:
         return False
+    if m.startswith("o1") or m.startswith("o3"):
+        return False
     return True
 
 def _get_fast_llm():

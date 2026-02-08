@@ -524,6 +524,11 @@ def _openai_model_supports_temperature(model: str) -> bool:
         return False
     return True
 
+def _openai_temperature_value(model: str, desired_temp: float) -> float:
+    if _openai_model_supports_temperature(model):
+        return desired_temp
+    return 1.0
+
 def _build_llm(temperature: float = 0.0, model_override: str = None):
     """Constrói um LLM baseado nas configurações."""
     model = model_override or settings.llm_model
@@ -544,16 +549,10 @@ def _build_llm(temperature: float = 0.0, model_override: str = None):
         if settings.openai_api_base:
             client_kwargs["base_url"] = settings.openai_api_base
 
-        if _openai_model_supports_temperature(model):
-            return ChatOpenAI(
-                model=model,
-                api_key=settings.openai_api_key,
-                temperature=desired_temp,
-                **client_kwargs
-            )
         return ChatOpenAI(
             model=model,
             api_key=settings.openai_api_key,
+            temperature=_openai_temperature_value(model, desired_temp),
             **client_kwargs
         )
 

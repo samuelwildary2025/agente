@@ -24,6 +24,11 @@ def _openai_model_supports_temperature(model: str) -> bool:
         return False
     return True
 
+def _openai_temperature_value(model: str, desired_temp: float) -> float:
+    if _openai_model_supports_temperature(model):
+        return desired_temp
+    return 1.0
+
 
 VECTOR_SEARCH_AGENT_PROMPT = """
 Você é o AGENTE BANCO VETORIAL do Mercadinho Queiroz.
@@ -52,16 +57,10 @@ def _get_fast_llm():
     if settings.openai_api_base:
         client_kwargs["base_url"] = settings.openai_api_base
 
-    if _openai_model_supports_temperature(model_name):
-        return ChatOpenAI(
-            model=model_name,
-            api_key=settings.openai_api_key,
-            temperature=temp,
-            **client_kwargs,
-        )
     return ChatOpenAI(
         model=model_name,
         api_key=settings.openai_api_key,
+        temperature=_openai_temperature_value(model_name, temp),
         **client_kwargs,
     )
 

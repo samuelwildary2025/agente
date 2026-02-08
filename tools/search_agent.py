@@ -123,6 +123,11 @@ def _openai_model_supports_temperature(model: str) -> bool:
         return False
     return True
 
+def _openai_temperature_value(model: str, desired_temp: float) -> float:
+    if _openai_model_supports_temperature(model):
+        return desired_temp
+    return 1.0
+
 def _get_fast_llm():
     """Retorna um modelo rápido e barato para tarefas de sub-agente."""
     global _HTTP_CLIENT_CACHE, _HTTP_ASYNC_CLIENT_CACHE
@@ -150,18 +155,10 @@ def _get_fast_llm():
         if _HTTP_ASYNC_CLIENT_CACHE is None:
             _HTTP_ASYNC_CLIENT_CACHE = httpx.AsyncClient(timeout=30.0)
         
-        if _openai_model_supports_temperature(model_name):
-            return ChatOpenAI(
-                model=model_name,
-                api_key=settings.openai_api_key,
-                temperature=temp,
-                http_client=_HTTP_CLIENT_CACHE,
-                http_async_client=_HTTP_ASYNC_CLIENT_CACHE,
-                **client_kwargs
-            )
         return ChatOpenAI(
             model=model_name,
             api_key=settings.openai_api_key,
+            temperature=_openai_temperature_value(model_name, temp),
             http_client=_HTTP_CLIENT_CACHE,
             http_async_client=_HTTP_ASYNC_CLIENT_CACHE,
             **client_kwargs

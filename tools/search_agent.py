@@ -126,8 +126,8 @@ def _get_fast_llm():
     global _HTTP_CLIENT_CACHE, _HTTP_ASYNC_CLIENT_CACHE
 
     # PREFERÊNCIA: Usar o modelo configurado no settings (ex: grok-beta)
-    model_name = getattr(settings, "llm_model", "gemini-2.5-flash")
-    temp = float(getattr(settings, "llm_temperature", 0.0))
+    model_name = settings.llm_model
+    temp = float(settings.llm_temperature) if settings.llm_temperature is not None else 0.0
 
     if settings.llm_provider == "google":
         return ChatGoogleGenerativeAI(

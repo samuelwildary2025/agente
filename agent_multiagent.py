@@ -524,9 +524,9 @@ def _openai_model_supports_temperature(model: str) -> bool:
 
 def _build_llm(temperature: float = 0.0, model_override: str = None):
     """Constrói um LLM baseado nas configurações."""
-    model = model_override or getattr(settings, "llm_model", "gemini-2.5-flash")
-    provider = getattr(settings, "llm_provider", "google")
-    desired_temp = float(getattr(settings, "llm_temperature", temperature))
+    model = model_override or settings.llm_model
+    provider = settings.llm_provider
+    desired_temp = float(settings.llm_temperature) if settings.llm_temperature is not None else float(temperature)
     
     if provider == "google":
         logger.debug(f"🚀 Usando Google Gemini: {model}")

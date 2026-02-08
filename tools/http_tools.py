@@ -448,9 +448,20 @@ def estoque_preco(ean: str) -> str:
                             pass
                 return False
 
+            def _extract_price(d: Dict[str, Any]) -> Optional[float]:
+                best_price = None
+                for k in PRICE_KEYS:
+                    if k in d:
+                        val = _parse_float(d.get(k))
+                        if val is not None:
+                            if val > 0:
+                                return val
+                            elif best_price is None:
+                                best_price = val
+                return best_price
+
             def _is_available(d: Dict[str, Any]) -> bool:
                 # 1. Verificar se está ativo (se a flag existir)
-                # Se 'ativo' não existir, assume True por padrão
                 is_active = d.get("ativo", True)
                 if not is_active:
                     logger.debug(f"Item filtrado: ativo=False")
@@ -464,27 +475,33 @@ def estoque_preco(ean: str) -> str:
                 # FRIGORIFICO/AÇOUGUE: vendem antes de dar entrada na nota
                 # HORTI/LEGUMES: idem, produção variável
                 cat = str(d.get("classificacao01", "")).upper()
-                ignora_estoque = any(x in cat for x in [
-                    "PADARIA",  # Pães, bolos - feitos na hora
-                    "FRIGORIFICO", "HORTI", "AÇOUGUE", "ACOUGUE", 
-                    "LEGUMES", "VERDURAS", "AVES", "CARNES",
-                    "FLV", "FRUTA"
-                ])
+                name_upper = str(d.get("produto") or d.get("nome") or "").upper()
+                
+                # Lista expandida de termos que IGNORAM estoque
+                keywords_ignore_stock = [
+                    "PADARIA", "FRIGORIFICO", "HORTI", "AÇOUGUE", "ACOUGUE", 
+                    "LEGUMES", "VERDURAS", "AVES", "CARNES", "FLV", "FRUTA",
+                    "FRANGO", "LINGUICA", "RESFRIADO", "CONGELADO", "BIFE", "MOIDA"
+                ]
+                
+                ignora_estoque = any(x in cat for x in keywords_ignore_stock) or \
+                                 any(x in name_upper for x in keywords_ignore_stock)
                 
                 if ignora_estoque:
                     # Regra de Exceção: Setor INDUSTRIAL (ex: Padaria Industrial)
                     # Produtos industrializados/embalados DEVEM respeitar o estoque do sistema
-                    if "INDUSTRIAL" in cat:
+                    # MAS se for FRIGORIFICO ou CARNE, ignora sempre (regra do cliente)
+                    is_meat = any(x in cat for x in ["FRIGORIFICO", "AVES", "CARNES"]) or \
+                              any(x in name_upper for x in ["FRANGO", "CARNE", "LINGUICA", "BIFE"])
+                              
+                    if "INDUSTRIAL" in cat and not is_meat:
                         logger.debug(f"Item de {cat}: Setor Industrial detectado, forçando verificação de estoque.")
                         # Continua para o check de quantidade lá embaixo...
                     else:
-                # Se não for industrial (ex: Padaria própria, Açougue), libera geral
-                        logger.debug(f"Item de {cat}: ignorando verificação de estoque (ativo={is_active})")
+                        logger.debug(f"Item de {cat}/{name_upper}: ignorando verificação de estoque (ativo={is_active})")
                         return True
                 
                 # REGRAS ESPECIAIS DE PESAGEM (KG) E PLU (Códigos curtos)
-                # Itens vendidos por peso (KG) ou com códigos curtos (PLU < 6 dígitos) geralmente não têm estoque controlado
-                name_upper = str(d.get("produto") or d.get("nome") or "").upper()
                 ean_str = str(d.get("cod_barra") or d.get("id") or "").strip()
                 
                 is_weighted = "KG" in name_upper.split() or name_upper.endswith("KG")
@@ -501,40 +518,6 @@ def estoque_preco(ean: str) -> str:
                 # Se chegou aqui, ou é 0, ou é negativo em categoria que não pode
                 logger.debug(f"Item filtrado: quantidade={qty} (Categoria: {cat})")
                 return False
-
-            def _extract_qty(d: Dict[str, Any]) -> Optional[float]:
-                # 1. Prioridade Absoluta: qtd_produto
-                # Se este campo existir, ele é a verdade absoluta (mesmo que seja 0)
-                if "qtd_produto" in d:
-                    try:
-                        return float(str(d.get("qtd_produto")).replace(',', '.'))
-                    except Exception:
-                        pass
-                
-                # 2. Fallback: Procurar outros campos positivos
-                best_qty = None
-                for k in STOCK_QTY_KEYS:
-                    # Já verificamos qtd_produto acima
-                    if k == "qtd_produto": continue
-                    
-                    if k in d:
-                        try:
-                            val = float(str(d.get(k)).replace(',', '.'))
-                            if val > 0:
-                                return val # Achou estoque positivo em campo secundário
-                            if best_qty is None:
-                                best_qty = val # Guarda o primeiro zero encontrado como fallback
-                        except Exception:
-                            pass
-                return best_qty
-
-            def _extract_price(d: Dict[str, Any]) -> Optional[float]:
-                for k in PRICE_KEYS:
-                    if k in d:
-                        val = _parse_float(d.get(k))
-                        if val is not None:
-                            return val
-                return None
 
             # [OTIMIZAÇÃO] Filtro estrito para saída
             sanitized: list[Dict[str, Any]] = []

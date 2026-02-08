@@ -139,6 +139,9 @@ Use estes pesos para converter unidades em quilos:
 - **Linguiça**: 0.100 kg (100g) -> 6 linguiças = 0.600kg (SEMPRE assuma UNIDADE se o cliente não ditar "pacote")
 - **Linguiça Calabresa**: 0.250 kg (250g)
 - **Frango Inteiro**: 2.200 kg (2.2kg) - Quando cliente pede "1 frango" (unidade)
+- **OBSERVAÇÃO (FRANGO CORTADO):**
+  - Se o cliente pedir **"frango inteiro cortado"**, trate como **Frango Inteiro** e coloque `observacao="cortado"` no `add_item_tool`.
+  - O item no sistema é vendido como **frango abatido** (o Analista deve retornar esse nome).
 
 ## 6. REGRAS ADICIONAIS
 1. Use "pedido" e não "carrinho".

@@ -89,6 +89,31 @@ def _run_analista_agent_for_term(term: str, telefone: Optional[str] = None) -> d
     result = agent.invoke({"messages": [HumanMessage(content=user_payload)]}, config)
     messages = result.get("messages", []) if isinstance(result, dict) else []
 
+    def _extract_price_from_estoque_preco_tool() -> Optional[float]:
+        for msg in reversed(messages):
+            if getattr(msg, "type", None) != "tool":
+                continue
+            tool_name = getattr(msg, "name", None) or getattr(msg, "tool", None)
+            if tool_name != "estoque_preco":
+                continue
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            content = (content or "").strip()
+            if not content:
+                continue
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, list) and parsed:
+                    item = parsed[0] if isinstance(parsed[0], dict) else None
+                    if item:
+                        p = item.get("preco")
+                        try:
+                            return float(p)
+                        except Exception:
+                            return None
+            except Exception:
+                continue
+        return None
+
     for m in reversed(messages):
         if getattr(m, "type", None) != "ai":
             continue
@@ -97,7 +122,18 @@ def _run_analista_agent_for_term(term: str, telefone: Optional[str] = None) -> d
         if not content:
             continue
         try:
-            return json.loads(content)
+            decision = json.loads(content)
+            if isinstance(decision, dict) and decision.get("ok") is True:
+                preco = decision.get("preco")
+                try:
+                    preco_num = float(preco) if preco is not None else 0.0
+                except Exception:
+                    preco_num = 0.0
+                if preco_num <= 0.0 and not decision.get("opcoes"):
+                    preco_tool = _extract_price_from_estoque_preco_tool()
+                    if preco_tool and preco_tool > 0:
+                        decision["preco"] = preco_tool
+            return decision
         except Exception:
             return {"ok": False, "termo": term, "motivo": "Resposta nao-JSON do analista"}
 

@@ -481,7 +481,7 @@ def estoque_preco(ean: str) -> str:
                 keywords_ignore_stock = [
                     "PADARIA", "FRIGORIFICO", "HORTI", "AÇOUGUE", "ACOUGUE", 
                     "LEGUMES", "VERDURAS", "AVES", "CARNES", "FLV", "FRUTA",
-                    "FRANGO", "LINGUICA", "RESFRIADO", "CONGELADO", "BIFE", "MOIDA"
+                    "FRANGO", "LINGUICA", "RESFRIADO", "CONGELADO", "BIFE", "MOIDA", "PICADINHO"
                 ]
                 
                 ignora_estoque = any(x in cat for x in keywords_ignore_stock) or \

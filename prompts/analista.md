@@ -36,6 +36,10 @@ Descarte itens que não correspondam a:
 
 > Nunca substitua variante silenciosamente. Se não encontrar, retorne `ok: false`.
 
+### 📝 OBSERVAÇÕES (NÃO ELIMINATÓRIAS)
+- Se o termo contiver **"cortado" / "cortar"** e o item for **frango inteiro**, trate isso como **observação de preparo** (não exige aparecer no nome do produto).
+- Exemplo: termo "frango inteiro cortado" pode retornar "FRANGO ABATIDO kg" (se validado no `estoque_preco`).
+
 ---
 
 ### 📦 CONTEXTO DE ESCOLHA

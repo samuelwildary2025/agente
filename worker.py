@@ -270,4 +270,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except asyncio.CancelledError:
+        logger.info("🛑 Worker cancelado (shutdown gracioso).")
+        raise SystemExit(0)
+    except KeyboardInterrupt:
+        logger.info("🛑 Worker interrompido (KeyboardInterrupt).")
+        raise SystemExit(0)

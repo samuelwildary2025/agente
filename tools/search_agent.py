@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 from config.logger import setup_logger
-from tools.vector_search_subagent import run_vector_search_subagent
+from tools.db_vector_search import run_vector_search
 from tools.http_tools import estoque_preco
 from tools.redis_tools import save_suggestions
 
@@ -48,7 +48,7 @@ def _fetch_stock(ean: str) -> Optional[Dict[str, Any]]:
 
 
 def _build_options(term: str, limit: int = 15) -> List[Dict[str, Any]]:
-    vector_output = run_vector_search_subagent(term, limit=limit)
+    vector_output = run_vector_search(term, limit=limit)
     candidates = _extract_eans_and_names(vector_output)
     if not candidates:
         return []
@@ -66,7 +66,10 @@ def _build_options(term: str, limit: int = 15) -> List[Dict[str, Any]]:
             qtd = item.get("qtd_produto")
             if preco is None:
                 continue
-            if qtd is not None and float(qtd) <= 0:
+            # FRIGORIFICO e HORTI-FRUTI: sempre disponíveis (estoque controlado diferente)
+            categoria1 = str(item.get("classificacao01") or "").strip().upper()
+            is_always_available = categoria1 in ("FRIGORIFICO", "HORTI-FRUTI")
+            if not is_always_available and qtd is not None and float(qtd) <= 0:
                 continue
             categoria_parts = [
                 str(item.get("classificacao01") or "").strip(),

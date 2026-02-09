@@ -17,6 +17,75 @@ logger = setup_logger(__name__)
 _openai_client = None
 _TERM_TRANSLATIONS_CACHE: Optional[Dict[str, object]] = None
 
+
+def _strip_leading_qty(text: str) -> str:
+    """Remove quantidades do início/fim da query para melhorar a busca."""
+    import re
+    s = (text or "").strip()
+    
+    # "2kg de carne" → "carne kg"
+    kg_suffix = re.search(r"\b\d+(?:[.,]\d+)?\s*(kg|kilo|quilo|quilos)\b\s*$", s, flags=re.IGNORECASE)
+    if kg_suffix:
+        s = re.sub(r"\b\d+(?:[.,]\d+)?\s*(kg|kilo|quilo|quilos)\b\s*$", "kg", s, flags=re.IGNORECASE).strip()
+        return s.strip()
+    
+    # "2kg de carne" no início → "carne kg"
+    kg_prefix = re.match(r"^\s*\d+(?:[.,]\d+)?\s*(kg|kilo|quilo|quilos)\b\s*(de\s+)?", s, flags=re.IGNORECASE)
+    if kg_prefix:
+        s = s[kg_prefix.end():].strip()
+        if s and not re.search(r"\bkg\b", s, flags=re.IGNORECASE):
+            s = f"{s} kg"
+        return s.strip()
+
+    # "3x coca" → "coca"
+    s = re.sub(r"^\s*\d+(?:[.,]\d+)?\s*[xX]?\s+", "", s)
+    s = re.sub(r"^\s*(aprox\.?|aproximadamente)\s+", "", s, flags=re.IGNORECASE)
+    return s.strip()
+
+
+def run_vector_search(query: str, limit: int = 15) -> str:
+    """
+    Função principal de busca vetorial com preprocessamento.
+    Substitui run_vector_search_subagent.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "Nenhum produto encontrado."
+
+    q = _strip_leading_qty(q)
+    
+    # Normalizar plural simples: "cenouras" → "cenoura", "beterrabas" → "beterraba"
+    import re
+    q_lower = q.lower().strip()
+    if q_lower.endswith('s') and not q_lower.endswith('ss'):
+        singular = q_lower[:-1]
+        # Verificar se o singular existe no dicionário
+        translations = _load_extra_term_translations()
+        if singular in translations and q_lower not in translations:
+            q = singular
+            logger.info(f"📝 [PLURAL→SINGULAR] '{q_lower}' → '{singular}'")
+
+    # Mapeamentos opcionais de termos
+    if getattr(settings, "vector_search_term_mappings", False) and getattr(settings, "vector_search_mode", "exact").lower() != "exact":
+        TERM_MAPPINGS = {
+            "pacote de pao": "pao hot dog",
+            "pacote de pão": "pao hot dog",
+        }
+        q_lower = q.lower()
+        for original, replacement in TERM_MAPPINGS.items():
+            if original in q_lower:
+                q = q_lower.replace(original, replacement)
+                logger.info(f"🔄 [TERM MAPPING] '{original}' → '{replacement}'")
+                break
+
+    logger.info(f"🔍 [VECTOR SEARCH] Buscando: '{q}' (limit={limit})")
+    
+    try:
+        return search_products_vector(q, limit=limit)
+    except Exception as e:
+        logger.error(f"Erro na busca vetorial: {e}")
+        return f"Erro ao buscar produtos: {str(e)}"
+
 def _load_extra_term_translations() -> Dict[str, str]:
     global _TERM_TRANSLATIONS_CACHE
     path = str(getattr(settings, "term_translations_path", "prompts/term_translations.json") or "").strip()
